@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PBMAS 數據覺察紀錄</title>
+    <meta name="description" content="PBMAS 系統主動覺察輸入介面，直連 Firebase 資料庫">
+    
+    <style>
+        :root {
+            --bg-color: #F5F5DC; /* 米色 */
+            --header-bg: #4B0082; /* 靛藍 */
+            --card-bg: #FFFFFF;
+            --text-main: #2F4F4F;
+            --accent-green: #2ecc71;
+            --border-radius: 16px;
+        }
+
+        body {
+            font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .logger-container {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 30px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+        }
+
+        .logger-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logger-header h2 {
+            margin: 0;
+            color: var(--header-bg);
+            font-size: 1.5rem;
+            letter-spacing: 1px;
+        }
+
+        .logger-header p {
+            margin: 5px 0 0;
+            font-size: 0.85rem;
+            color: #708090;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        .input-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+
+        select, input[type="number"], input[type="range"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            background-color: #fafafa;
+            box-sizing: border-box;
+        }
+
+        /* 自訂滑桿外觀 */
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: transparent;
+            padding: 0;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: var(--header-bg);
+            cursor: pointer;
+            margin-top: -6px;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #e0e0e0;
+            border-radius: 4px;
+        }
+
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #708090;
+            margin-top: 5px;
+        }
+
+        .submit-btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--header-bg), #2c3e50);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 25px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.3s, transform 0.1s;
+            margin-top: 10px;
+        }
+
+        .submit-btn:active {
+            transform: scale(0.98);
+        }
+
+        #status-message {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="logger-container">
+    <div class="logger-header">
+        <h2>🐍 PBMAS 覺察紀錄</h2>
+        <p>與您的數位分身同步生理狀態</p>
+    </div>
+
+    <div class="input-group">
+        <label>🕒 斷食排程 (Fasting)</label>
+        <select id="fasting-status">
+            <option value="16/8 進行中">16/8 間歇性斷食 (進行中)</option>
+            <option value="18/6 進行中">18/6 深度斷食 (進行中)</option>
+            <option value="OMAD 一日一餐">OMAD 一日一餐</option>
+            <option value="進食區間">目前為進食區間</option>
+        </select>
+    </div>
+
+    <div class="input-group">
+        <label>🔥 身體發炎感受 (Inflammation)</label>
+        <input type="range" id="inflammation-score" min="1" max="5" value="2">
+        <div class="slider-labels">
+            <span>1 (極低/無感)</span>
+            <span>3 (輕微痠痛)</span>
+            <span>5 (明顯發炎)</span>
+        </div>
+    </div>
+
+    <div class="input-group">
+        <label>👟 今日累計步數 (Steps) - 預留手動</label>
+        <input type="number" id="step-count" placeholder="例如: 8500" value="">
+    </div>
+
+    <button class="submit-btn" id="submit-btn">同步至 12 生肖面板</button>
+    <div id="status-message"></div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+
+    // TODO: 填入您的 Firebase 配置 (與控制面板相同)
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "your-project-id.firebaseapp.com",
+        databaseURL: "https://your-project-id-default-rtdb.firebaseio.com",
+        projectId: "your-project-id",
+        storageBucket: "your-project-id.appspot.com",
+        messagingSenderId: "YOUR_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    document.getElementById('submit-btn').addEventListener('click', () => {
+        const btn = document.getElementById('submit-btn');
+        const status = document.getElementById('status-message');
+        
+        btn.innerText = "上傳中...";
+        btn.style.opacity = "0.7";
+
+        // 取得輸入值
+        const fasting = document.getElementById('fasting-status').value;
+        const inflamScore = document.getElementById('inflammation-score').value;
+        const steps = document.getElementById('step-count').value || "未紀錄";
+        
+        // 將 1-5 轉換為文字描述以便於面板顯示
+        let inflamText = "低";
+        if(inflamScore >= 4) inflamText = "高 (需注意)";
+        else if(inflamScore == 3) inflamText = "中 (輕微)";
+
+        // 寫入 Firebase (覆蓋 pbmas_latest 節點)
+        set(ref(db, 'health_data/pbmas_latest'), {
+            fasting: fasting,
+            inflammation: inflamText + ` (等級 ${inflamScore})`,
+            steps: steps + (steps !== "未紀錄" ? " 步" : ""),
+            timestamp: new Date().toISOString() // 儲存 ISO 格式供未來分析
+        })
+        .then(() => {
+            btn.innerText = "同步成功！";
+            status.style.color = "var(--accent-green)";
+            status.innerText = "數據已成功推流至控制面板";
+            
+            setTimeout(() => {
+                btn.innerText = "同步至 12 生肖面板";
+                btn.style.opacity = "1";
+                status.innerText = "";
+            }, 3000);
+        })
+        .catch((error) => {
+            console.error("寫入失敗:", error);
+            btn.innerText = "同步失敗";
+            status.style.color = "red";
+            status.innerText = "請檢查 Firebase 規則與連線";
+            btn.style.opacity = "1";
+        });
+    });
+</script>
+
+</body>
+</html>
